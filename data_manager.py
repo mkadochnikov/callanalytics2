@@ -217,6 +217,62 @@ class DataManager:
         except Exception as e:
             logger.error(f"Ошибка очистки кеша: {e}")
 
+    def clear_analysis_for_date(self, date_str: str):
+        """Очищает результаты анализа для определенной даты (оставляя транскрипции и аудио)"""
+        try:
+            analysis_date_dir = self.analysis_dir / date_str
+            if analysis_date_dir.exists():
+                # Удаляем все файлы анализа
+                for analysis_file in analysis_date_dir.glob("*_analysis.json"):
+                    analysis_file.unlink()
+                    logger.info(f"Удален файл анализа: {analysis_file}")
+
+                # Удаляем папку если она пуста
+                if not any(analysis_date_dir.iterdir()):
+                    analysis_date_dir.rmdir()
+                    logger.info(f"Удалена пустая папка анализа: {analysis_date_dir}")
+
+                logger.info(f"Очищены результаты анализа за {date_str}")
+            else:
+                logger.info(f"Нет результатов анализа за {date_str}")
+
+        except Exception as e:
+            logger.error(f"Ошибка очистки анализа за {date_str}: {e}")
+
+    def has_transcripts_for_date(self, date_str: str) -> bool:
+        """Проверяет, есть ли транскрипции за указанную дату"""
+        transcripts_date_dir = self.base_dir / "transcripts" / date_str
+        if transcripts_date_dir.exists():
+            return len(list(transcripts_date_dir.glob("*.txt"))) > 0
+        return False
+
+    def get_reanalysis_info(self, target_date: datetime.datetime) -> Dict:
+        """Возвращает информацию о возможности переанализа"""
+        date_str = target_date.strftime("%Y-%m-%d")
+
+        has_cache = self.is_data_cached(target_date)
+        has_transcripts = self.has_transcripts_for_date(date_str)
+
+        info = {
+            "date": date_str,
+            "has_cached_calls": has_cache,
+            "has_transcripts": has_transcripts,
+            "can_reanalyze": has_cache and has_transcripts
+        }
+
+        if has_cache:
+            # Подсчитываем количество звонков с транскрипциями
+            try:
+                calls = self.load_calls_from_cache(target_date)
+                calls_with_transcripts = sum(1 for call in calls if call.get('transcript'))
+                info["total_calls"] = len(calls)
+                info["calls_with_transcripts"] = calls_with_transcripts
+            except:
+                info["total_calls"] = 0
+                info["calls_with_transcripts"] = 0
+
+        return info
+
     def get_cache_statistics(self) -> Dict:
         """Возвращает статистику по кешу"""
         try:

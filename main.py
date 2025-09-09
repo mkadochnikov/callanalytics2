@@ -104,9 +104,40 @@ def main():
     with col2:
         st.header("🚀 Действия")
 
-        if st.button("🤖 Загрузить и проанализировать", type="primary", use_container_width=True):
+        # Проверяем доступность переанализа
+        reanalysis_available = False
+        total_cached_calls = 0
+
+        if start_date <= end_date:
+            # Проверяем для каждой даты в диапазоне
+            date_range_check = pd.date_range(start_date, end_date)
+            for date_check in date_range_check:
+                target_datetime = datetime.datetime.combine(date_check.date(), datetime.time())
+                reanalysis_info = analyzer.data_manager.get_reanalysis_info(target_datetime)
+                if reanalysis_info["can_reanalyze"]:
+                    reanalysis_available = True
+                    total_cached_calls += reanalysis_info.get("calls_with_transcripts", 0)
+
+        # Опция принудительного переанализа
+        force_reanalyze = False
+        if reanalysis_available:
+            force_reanalyze = st.checkbox(
+                f"🔄 Переанализировать существующие данные ({total_cached_calls} звонков)",
+                help="Обновить анализ возражений для уже транскрибированных звонков без повторного скачивания аудио"
+            )
+
+            if force_reanalyze:
+                st.info(
+                    "📝 Будет выполнен только переанализ текстов. Аудиозаписи и транскрипции останутся без изменений.")
+
+        # Основная кнопка обработки
+        button_text = "🔄 Переанализировать" if force_reanalyze else "🤖 Загрузить и проанализировать"
+
+        if st.button(button_text, type="primary", use_container_width=True):
             if start_date <= end_date:
-                with st.spinner("Обработка с локальными ИИ моделями..."):
+                processing_text = "Переанализ с обновленными алгоритмами..." if force_reanalyze else "Обработка с локальными ИИ моделями..."
+
+                with st.spinner(processing_text):
                     all_calls = []
 
                     # Прогресс бар
@@ -115,17 +146,24 @@ def main():
                     status_text = st.empty()
 
                     for i, date in enumerate(date_range):
+                        action_text = "Переанализ" if force_reanalyze else "Обработка"
                         status_text.info(
-                            f"🔄 Обработка: {date.strftime('%d.%m.%Y')} (день {i + 1} из {len(date_range)})")
+                            f"🔄 {action_text}: {date.strftime('%d.%m.%Y')} (день {i + 1} из {len(date_range)})")
 
                         target_datetime = datetime.datetime.combine(date.date(), datetime.time())
-                        calls = analyzer.process_calls_for_date(target_datetime)
+
+                        # Передаем флаг принудительного переанализа
+                        calls = analyzer.process_calls_for_date(target_datetime, force_reanalyze=force_reanalyze)
                         all_calls.extend(calls)
 
                         progress_bar.progress((i + 1) / len(date_range))
 
                     st.session_state.all_calls = all_calls
-                    status_text.success(f"✅ Обработано {len(all_calls)} звонков с помощью локальных ИИ моделей")
+
+                    if force_reanalyze:
+                        status_text.success(f"✅ Переанализировано {len(all_calls)} звонков с обновленными алгоритмами")
+                    else:
+                        status_text.success(f"✅ Обработано {len(all_calls)} звонков с помощью локальных ИИ моделей")
             else:
                 st.error("❌ Начальная дата должна быть меньше конечной")
 

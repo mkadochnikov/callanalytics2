@@ -90,6 +90,45 @@ class BitrixCallAnalyzer:
                 "rejection_reason": None
             }
 
+    def reanalyze_cached_calls(self, target_date: datetime.datetime, progress_callback=None) -> List[Dict]:
+        """Переанализирует кешированные звонки без повторной транскрибации"""
+        date_str = target_date.strftime("%Y-%m-%d")
+
+        # Загружаем кешированные данные
+        if not self.data_manager.is_data_cached(target_date):
+            logger.warning(f"Нет кешированных данных за {date_str}")
+            return []
+
+        calls = self.data_manager.load_calls_from_cache(target_date)
+        logger.info(f"Переанализ {len(calls)} звонков за {date_str}")
+
+        # Очищаем старые результаты анализа для этой даты
+        self.data_manager.clear_analysis_for_date(date_str)
+
+        total_calls = len(calls)
+        for i, call in enumerate(calls):
+            if progress_callback:
+                progress_callback(i, total_calls)
+
+            # Переанализируем только если есть транскрипция
+            if call.get('transcript'):
+                logger.info(f"Переанализируем звонок {i + 1}/{total_calls}: {call.get('audio_filename', 'unknown')}")
+
+                # Заново анализируем транскрипцию
+                analysis = self.analyze_transcript(call['transcript'], call)
+                call['analysis'] = analysis
+
+                # Сохраняем новый результат анализа
+                if 'audio_file' in call:
+                    filename = Path(call['audio_file']).stem
+                    self.data_manager.save_analysis(analysis, filename, date_str)
+
+        # Сохраняем обновленные данные в кеш
+        self.data_manager.save_calls_to_cache(target_date, calls)
+
+        logger.info(f"Переанализ завершен для {len(calls)} звонков")
+        return calls
+
     def get_objections_statistics(self, calls: List[Dict]) -> Dict:
         """Получает статистику по возражениям"""
         objection_stats = {}
@@ -163,11 +202,16 @@ class BitrixCallAnalyzer:
         logger.info(f"Отчет по возражениям сохранен: {report_path}")
         return str(report_path)
 
-    def process_calls_for_date(self, target_date: datetime.datetime) -> List[Dict]:
+    def process_calls_for_date(self, target_date: datetime.datetime, force_reanalyze: bool = False) -> List[Dict]:
         """Обрабатывает звонки за дату - полный цикл"""
         date_str = target_date.strftime("%Y-%m-%d")
 
-        # Проверяем кеш
+        # Если включена принудительная переобработка и есть кешированные данные
+        if force_reanalyze and self.data_manager.is_data_cached(target_date):
+            logger.info(f"Принудительный переанализ кешированных данных за {date_str}")
+            return self.reanalyze_cached_calls(target_date)
+
+        # Проверяем кеш (стандартное поведение)
         if self.data_manager.is_data_cached(target_date):
             logger.info(f"Используем кешированные данные за {date_str}")
             return self.data_manager.load_calls_from_cache(target_date)
@@ -219,7 +263,7 @@ class BitrixCallAnalyzer:
                 # Анализ
                 existing_analysis = self.data_manager.load_analysis(filename, date_str)
 
-                if existing_analysis:
+                if existing_analysis and not force_reanalyze:
                     call['analysis'] = existing_analysis
                 else:
                     logger.info(f"Анализируем: {call.get('audio_filename', 'транскрипцию')}")
@@ -228,7 +272,7 @@ class BitrixCallAnalyzer:
                     self.data_manager.save_analysis(analysis, filename, date_str)
 
             # Для тестовых данных добавляем анализ
-            elif call.get('transcript') and not call.get('analysis'):
+            elif call.get('transcript') and (not call.get('analysis') or force_reanalyze):
                 call['analysis'] = self.analyze_transcript(call['transcript'], call)
 
         # Сохраняем в кеш
