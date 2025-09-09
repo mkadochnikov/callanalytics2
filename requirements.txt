@@ -11,6 +11,9 @@ torch>=2.0.0
 transformers>=4.35.0
 openai-whisper>=20231117
 
+# Модель для анализа возражений и тональности
+# sismetanin/rubert-ru-sentiment-rureviews будет загружена автоматически через transformers
+
 # Для работы с аудио
 librosa>=0.10.0
 soundfile>=0.12.0
@@ -19,8 +22,14 @@ soundfile>=0.12.0
 numpy>=1.24.0
 scipy>=1.10.0
 
+# Для токенизации и работы с RuBERT
+tokenizers>=0.14.0
+
 # Для PDF экспорта
 reportlab>=4.0.0
+
+# Для сентимент анализа (опционально, если потребуются дополнительные возможности)
+scikit-learn>=1.3.0
 
 # Примечание: pathlib и hashlib - встроенные модули Python, устанавливать не нужно
 

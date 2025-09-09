@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Streamlit веб-интерфейс для системы анализа звонков с аналитикой по менеджерам
+Streamlit веб-интерфейс для системы анализа звонков с аналитикой по менеджерам и возражениям
 """
 
 from config import *
@@ -18,7 +18,7 @@ def main():
     )
 
     st.title("🤖 Bitrix24 Local AI Analytics")
-    st.markdown("**Полностью локальная система анализа звонков с ИИ** • Whisper + Transformers")
+    st.markdown("**Полностью локальная система анализа звонков с ИИ** • Whisper + RuBERT + Transformers")
 
     # Проверяем доступность CUDA
     device_info = "🔥 CUDA GPU" if torch.cuda.is_available() else "💻 CPU"
@@ -58,6 +58,16 @@ def main():
 
         classifier_status = "✅ Загружена" if analyzer.ai_analyzer.classifier else "❌ Ошибка"
         st.write(f"**Классификация тем:** {classifier_status}")
+
+        sentiment_status = "✅ Загружена" if analyzer.ai_analyzer.sentiment_model else "❌ Ошибка"
+        st.write(f"**RuBERT Sentiment:** {sentiment_status}")
+
+        # Статистика по возражениям
+        if hasattr(analyzer.ai_analyzer, 'custom_objections'):
+            custom_count = len(analyzer.ai_analyzer.custom_objections)
+            total_count = len(OBJECTION_CATEGORIES) + custom_count
+            st.write(
+                f"**Категории возражений:** {total_count} (базовых: {len(OBJECTION_CATEGORIES)}, пользовательских: {custom_count})")
 
     # Основной интерфейс
     col1, col2 = st.columns([2, 1])
@@ -119,6 +129,12 @@ def main():
             else:
                 st.error("❌ Начальная дата должна быть меньше конечной")
 
+        # Кнопка экспорта отчета по возражениям
+        if 'all_calls' in st.session_state and st.session_state.all_calls:
+            if st.button("📄 Экспорт отчета по возражениям", use_container_width=True):
+                report_path = analyzer.export_objections_report(st.session_state.all_calls)
+                st.success(f"✅ Отчет сохранен: {report_path}")
+
     # Показываем результаты анализа
     show_analysis_results()
 
@@ -131,6 +147,10 @@ def show_analysis_results():
     st.header("📊 Статистика по обработанным данным")
 
     calls_data = st.session_state.all_calls
+
+    # Получаем статистику возражений
+    analyzer = st.session_state.analyzer
+    objections_stats = analyzer.get_objections_statistics(calls_data)
 
     # Метрики
     col1, col2, col3, col4, col5, col6 = st.columns(6)
@@ -147,32 +167,92 @@ def show_analysis_results():
         st.metric("Исходящие", outgoing)
 
     with col4:
-        unknown = sum(1 for call in calls_data if call.get('call_direction') == 'unknown')
-        st.metric("Неопределенные", unknown)
-
-    with col5:
         with_audio = sum(1 for call in calls_data if 'audio_file' in call)
         st.metric("С аудиозаписью", with_audio)
 
-    with col6:
+    with col5:
         analyzed = sum(1 for call in calls_data if 'analysis' in call)
         st.metric("Проанализировано ИИ", analyzed)
 
-    # НОВЫЙ РАЗДЕЛ: Аналитика по менеджерам
+    with col6:
+        objections_count = objections_stats['total_calls_with_objections']
+        objections_percent = (objections_count / len(calls_data) * 100) if calls_data else 0
+        st.metric("Возражения", f"{objections_count} ({objections_percent:.1f}%)")
+
+    # Аналитика возражений
+    show_objections_analysis(calls_data, objections_stats)
+
+    # РАЗДЕЛ: Аналитика по менеджерам
     st.markdown("---")
     show_manager_analytics(calls_data)
-    
+
     # Разделитель перед остальными разделами
     st.markdown("---")
 
     # Сводные таблицы
-    show_summary_tables(calls_data)
+    show_summary_tables(calls_data, objections_stats)
 
     # Детализация
     show_call_details(calls_data)
 
 
-def show_summary_tables(calls_data):
+def show_objections_analysis(calls_data, objections_stats):
+    """Показывает детальный анализ возражений"""
+    st.header("🚫 Анализ возражений клиентов")
+
+    if not objections_stats['objections']:
+        st.info("В данном периоде возражения не обнаружены")
+        return
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.subheader("📊 Топ возражений")
+
+        # Создаем DataFrame для визуализации
+        objections_df = pd.DataFrame([
+            {
+                'Возражение': objection.replace('🎯 ', '').replace('⏰ ', '').replace('🔄 ', '').replace('🔍 ', '').replace(
+                    '🤝 ', '').replace('⚙️ ', '').replace('🛡️ ', '').replace('⭐ ', '').replace('🔧 ', '').replace('🎓 ',
+                                                                                                                '').replace(
+                    '🔮 ', ''),
+                'Количество': count,
+                'Процент': f"{count / objections_stats['total_calls_with_objections'] * 100:.1f}%",
+                'Оригинальное название': objection
+            }
+            for objection, count in sorted(objections_stats['objections'].items(), key=lambda x: x[1], reverse=True)
+        ])
+
+        st.dataframe(objections_df[['Возражение', 'Количество', 'Процент']], use_container_width=True, hide_index=True)
+
+    with col2:
+        st.subheader("💡 Рекомендации по работе")
+
+        # Показываем рекомендации для топ-5 возражений
+        top_objections = list(objections_stats['objections'].keys())[:5]
+        objection_categories = objections_stats['objection_categories']
+
+        for objection in top_objections:
+            if objection in objection_categories:
+                recommendation = objection_categories[objection].get('recommendation', 'Индивидуальный подход')
+                st.write(f"**{objection}**")
+                st.write(f"→ {recommendation}")
+                st.write("")
+
+    # Тональность разговоров с возражениями
+    st.subheader("😊 Тональность звонков")
+    sentiment_stats = objections_stats['sentiment']
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("😊 Позитивная", sentiment_stats.get('positive', 0))
+    with col2:
+        st.metric("😐 Нейтральная", sentiment_stats.get('neutral', 0))
+    with col3:
+        st.metric("😞 Негативная", sentiment_stats.get('negative', 0))
+
+
+def show_summary_tables(calls_data, objections_stats):
     """Показывает сводные таблицы"""
     st.header("📊 Сводные таблицы ИИ анализа")
 
@@ -195,25 +275,22 @@ def show_summary_tables(calls_data):
             st.dataframe(topic_df, use_container_width=True, hide_index=True)
 
     with col2:
-        # Таблица отказов
-        rejection_data = {}
-        for call in calls_data:
-            analysis = call.get('analysis', {})
-            rejection = analysis.get('rejection_reason')
-            if rejection:
-                rejection_data[rejection] = rejection_data.get(rejection, 0) + 1
-
-        if rejection_data:
-            st.subheader("❌ Причины отказов")
-            rejection_df = pd.DataFrame([
-                {'Причина отказа': reason, 'Количество': count,
-                 'Процент': f"{count / len([c for c in calls_data if c.get('analysis', {}).get('rejection_reason')]) * 100:.1f}%"}
-                for reason, count in sorted(rejection_data.items(), key=lambda x: x[1], reverse=True)
+        # Таблица возражений
+        objections = objections_stats['objections']
+        if objections:
+            st.subheader("🚫 Возражения клиентов")
+            objection_df = pd.DataFrame([
+                {
+                    'Возражение': objection,
+                    'Количество': count,
+                    'Процент': f"{count / objections_stats['total_calls_with_objections'] * 100:.1f}%"
+                }
+                for objection, count in sorted(objections.items(), key=lambda x: x[1], reverse=True)
             ])
-            st.dataframe(rejection_df, use_container_width=True, hide_index=True)
+            st.dataframe(objection_df, use_container_width=True, hide_index=True)
         else:
-            st.subheader("❌ Причины отказов")
-            st.info("Отказы не обнаружены в анализируемых звонках")
+            st.subheader("🚫 Возражения клиентов")
+            st.info("Возражения не обнаружены в анализируемых звонках")
 
 
 def show_call_details(calls_data):
@@ -236,6 +313,19 @@ def show_call_details(calls_data):
         else:
             formatted_time = call_time
 
+        # Получаем данные о возражении
+        objection_reason = analysis.get('objection_reason', '')
+        objection_recommendation = analysis.get('objection_recommendation', '')
+        sentiment_info = analysis.get('sentiment', {})
+        sentiment = sentiment_info.get('sentiment', 'neutral')
+
+        # Формируем строку с возражением и рекомендацией
+        objection_info = ""
+        if objection_reason:
+            objection_info = f"{objection_reason}"
+            if objection_recommendation:
+                objection_info += f" → {objection_recommendation}"
+
         table_data.append({
             'Дата/время': formatted_time,
             'Менеджер': call.get('user_name', ''),
@@ -245,7 +335,8 @@ def show_call_details(calls_data):
                 'unknown', '❓ Неопределенный'),
             'Длительность': f"{call.get('CALL_DURATION', 0)} сек",
             'Тема (ИИ)': analysis.get('topic', 'Неопределенная тема'),
-            'Причина отказа (ИИ)': analysis.get('rejection_reason', ''),
+            'Возражение → Рекомендация': objection_info,
+            'Тональность': f"{'😊' if sentiment == 'positive' else '😐' if sentiment == 'neutral' else '😞'} {sentiment.title()}",
             'Транскрипция': '✅ Есть' if call.get('transcript') else '❌ Нет'
         })
 
@@ -286,10 +377,22 @@ def show_transcript_examples(calls_data):
                 st.write("**ИИ Анализ:**")
                 st.write(f"**Тема:** {analysis.get('topic', 'Неопределенная тема')}")
 
-                if analysis.get('rejection_reason'):
-                    st.write(f"**Причина отказа:** {analysis['rejection_reason']}")
+                objection_reason = analysis.get('objection_reason')
+                if objection_reason:
+                    st.write(f"**Возражение:** {objection_reason}")
+                    recommendation = analysis.get('objection_recommendation')
+                    if recommendation:
+                        st.write(f"**Рекомендация:** {recommendation}")
                 else:
-                    st.write("**Причина отказа:** Не выявлена")
+                    st.write("**Возражения:** Не выявлены")
+
+                # Информация о тональности
+                sentiment_info = analysis.get('sentiment', {})
+                if sentiment_info:
+                    sentiment = sentiment_info.get('sentiment', 'neutral')
+                    confidence = sentiment_info.get('confidence', 0.0)
+                    emoji = {'positive': '😊', 'neutral': '😐', 'negative': '😞'}.get(sentiment, '😐')
+                    st.write(f"**Тональность:** {emoji} {sentiment.title()} ({confidence:.2f})")
 
                 key_points = analysis.get('key_points', [])
                 if key_points:
@@ -302,4 +405,3 @@ def show_transcript_examples(calls_data):
 
 if __name__ == "__main__":
     main()
-

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Основной класс для анализа звонков Bitrix24
+Основной класс для анализа звонков Bitrix24 с поддержкой анализа возражений
 """
 
 from config import *
@@ -34,6 +34,10 @@ class BitrixCallAnalyzer:
             return {
                 "topic": "Неопределенная тема",
                 "key_points": [],
+                "objection_reason": None,
+                "objection_recommendation": None,
+                "sentiment": {"sentiment": "neutral", "confidence": 0.0},
+                # Для обратной совместимости
                 "rejection_reason": None
             }
 
@@ -43,8 +47,21 @@ class BitrixCallAnalyzer:
             # Определяем тему (улучшенный алгоритм)
             topic = self.ai_analyzer.classify_topic(transcript)
 
-            # Ищем причину отказа (улучшенный алгоритм)
-            rejection_reason = self.ai_analyzer.find_rejection_reason(transcript)
+            # Анализируем возражения с новой системой
+            objection_result = self.ai_analyzer.find_objection_reason(transcript)
+
+            objection_reason = None
+            objection_recommendation = None
+            sentiment_data = {"sentiment": "neutral", "confidence": 0.0}
+
+            if objection_result:
+                objection_reason = objection_result["objection"]
+                objection_recommendation = objection_result["recommendation"]
+                sentiment_data = objection_result["sentiment"]
+
+                # Логируем если создана новая категория
+                if objection_result.get("is_new_category"):
+                    logger.info(f"🔮 Создана новая категория возражения: {objection_reason}")
 
             # Извлекаем ключевые моменты
             key_points = self.ai_analyzer.extract_key_points(transcript)
@@ -52,10 +69,14 @@ class BitrixCallAnalyzer:
             result = {
                 "topic": topic,
                 "key_points": key_points,
-                "rejection_reason": rejection_reason
+                "objection_reason": objection_reason,
+                "objection_recommendation": objection_recommendation,
+                "sentiment": sentiment_data,
+                # Для обратной совместимости со старым кодом
+                "rejection_reason": objection_reason
             }
 
-            logger.info(f"Анализ завершен: тема={topic}, отказ={rejection_reason}")
+            logger.info(f"Анализ завершен: тема={topic}, возражение={objection_reason}")
             return result
 
         except Exception as e:
@@ -63,8 +84,84 @@ class BitrixCallAnalyzer:
             return {
                 "topic": "Ошибка анализа",
                 "key_points": [],
+                "objection_reason": None,
+                "objection_recommendation": None,
+                "sentiment": {"sentiment": "neutral", "confidence": 0.0},
                 "rejection_reason": None
             }
+
+    def get_objections_statistics(self, calls: List[Dict]) -> Dict:
+        """Получает статистику по возражениям"""
+        objection_stats = {}
+        recommendations_stats = {}
+        sentiment_stats = {"positive": 0, "neutral": 0, "negative": 0}
+
+        for call in calls:
+            analysis = call.get('analysis', {})
+
+            # Статистика возражений
+            objection = analysis.get('objection_reason')
+            if objection:
+                objection_stats[objection] = objection_stats.get(objection, 0) + 1
+
+                # Статистика рекомендаций
+                recommendation = analysis.get('objection_recommendation')
+                if recommendation:
+                    recommendations_stats[recommendation] = recommendations_stats.get(recommendation, 0) + 1
+
+            # Статистика тональности
+            sentiment_info = analysis.get('sentiment', {})
+            sentiment = sentiment_info.get('sentiment', 'neutral')
+            if sentiment in sentiment_stats:
+                sentiment_stats[sentiment] += 1
+
+        return {
+            "objections": objection_stats,
+            "recommendations": recommendations_stats,
+            "sentiment": sentiment_stats,
+            "total_calls_with_objections": len([c for c in calls if c.get('analysis', {}).get('objection_reason')]),
+            "objection_categories": self.ai_analyzer.get_all_objection_categories()
+        }
+
+    def export_objections_report(self, calls: List[Dict], filename: str = None) -> str:
+        """Экспортирует детальный отчет по возражениям"""
+        if not filename:
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"objections_report_{timestamp}.json"
+
+        report_data = {
+            "generated_at": datetime.datetime.now().isoformat(),
+            "total_calls": len(calls),
+            "statistics": self.get_objections_statistics(calls),
+            "detailed_calls": []
+        }
+
+        for call in calls:
+            analysis = call.get('analysis', {})
+            objection_reason = analysis.get('objection_reason')
+
+            if objection_reason:  # Включаем только звонки с возражениями
+                call_data = {
+                    "call_id": call.get('ID'),
+                    "date": call.get('CALL_START_DATE'),
+                    "manager": call.get('user_name'),
+                    "phone": call.get('PHONE_NUMBER'),
+                    "topic": analysis.get('topic'),
+                    "objection": objection_reason,
+                    "recommendation": analysis.get('objection_recommendation'),
+                    "sentiment": analysis.get('sentiment'),
+                    "key_points": analysis.get('key_points', []),
+                    "transcript_sample": call.get('transcript', '')[:200] + "..." if call.get('transcript') else None
+                }
+                report_data["detailed_calls"].append(call_data)
+
+        # Сохраняем отчет
+        report_path = self.reports_dir / filename
+        with open(report_path, 'w', encoding='utf-8') as f:
+            json.dump(report_data, f, ensure_ascii=False, indent=2, default=str)
+
+        logger.info(f"Отчет по возражениям сохранен: {report_path}")
+        return str(report_path)
 
     def process_calls_for_date(self, target_date: datetime.datetime) -> List[Dict]:
         """Обрабатывает звонки за дату - полный цикл"""
@@ -190,7 +287,7 @@ class BitrixCallAnalyzer:
         return calls
 
     def generate_pdf_report(self, all_calls: List[Dict], date_range: str) -> Optional[bytes]:
-        """Генерирует PDF отчет"""
+        """Генерирует PDF отчет с анализом возражений"""
         try:
             from reportlab.lib.pagesizes import A4
             from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
@@ -215,7 +312,7 @@ class BitrixCallAnalyzer:
             story = []
 
             # Заголовок
-            story.append(Paragraph("Отчет по звонкам Bitrix24", title_style))
+            story.append(Paragraph("Отчет по звонкам Bitrix24 с анализом возражений", title_style))
             story.append(Paragraph(f"Период: {date_range}", styles['Normal']))
             story.append(Paragraph(f"Создан: {datetime.datetime.now().strftime('%d.%m.%Y %H:%M')}", styles['Normal']))
             story.append(Spacer(1, 20))
@@ -225,12 +322,16 @@ class BitrixCallAnalyzer:
             incoming_calls = sum(1 for call in all_calls if call.get('call_direction') == 'incoming')
             outgoing_calls = sum(1 for call in all_calls if call.get('call_direction') == 'outgoing')
 
+            # Статистика возражений
+            objections_stats = self.get_objections_statistics(all_calls)
+
             stats_data = [
                 ['Показатель', 'Значение'],
                 ['Всего звонков', str(total_calls)],
                 ['Входящие звонки', str(incoming_calls)],
                 ['Исходящие звонки', str(outgoing_calls)],
-                ['С аудиозаписью', str(sum(1 for call in all_calls if 'audio_file' in call))]
+                ['С аудиозаписью', str(sum(1 for call in all_calls if 'audio_file' in call))],
+                ['Обнаружены возражения', str(objections_stats['total_calls_with_objections'])]
             ]
 
             stats_table = Table(stats_data)
@@ -246,21 +347,16 @@ class BitrixCallAnalyzer:
             story.append(stats_table)
             story.append(Spacer(1, 20))
 
-            # Темы звонков
-            topics = {}
-            for call in all_calls:
-                analysis = call.get('analysis', {})
-                topic = analysis.get('topic', 'Неопределенная тема')
-                topics[topic] = topics.get(topic, 0) + 1
+            # Статистика возражений
+            objections = objections_stats['objections']
+            if objections:
+                story.append(Paragraph("Анализ возражений", styles['Heading2']))
+                objection_data = [['Возражение', 'Количество']]
+                for objection, count in sorted(objections.items(), key=lambda x: x[1], reverse=True):
+                    objection_data.append([objection, str(count)])
 
-            if topics:
-                story.append(Paragraph("Темы звонков", styles['Heading2']))
-                topic_data = [['Тема', 'Количество']]
-                for topic, count in sorted(topics.items(), key=lambda x: x[1], reverse=True):
-                    topic_data.append([topic, str(count)])
-
-                topic_table = Table(topic_data)
-                topic_table.setStyle(TableStyle([
+                objection_table = Table(objection_data)
+                objection_table.setStyle(TableStyle([
                     ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
                     ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
                     ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
@@ -268,7 +364,7 @@ class BitrixCallAnalyzer:
                     ('GRID', (0, 0), (-1, -1), 1, colors.black)
                 ]))
 
-                story.append(topic_table)
+                story.append(objection_table)
 
             # Создаем PDF
             doc.build(story)
