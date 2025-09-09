@@ -1,0 +1,16 @@
+# Byte-compiled files
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environments
+.venv/
+.env/
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# Analytics
+bitrix_analytics/

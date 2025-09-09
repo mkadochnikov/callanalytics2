@@ -1,0 +1,30 @@
+# Основные зависимости
+streamlit>=1.28.0
+requests>=2.31.0
+pandas>=2.0.0
+plotly>=5.15.0
+beautifulsoup4>=4.12.0
+pytz>=2023.3
+
+# Локальные ИИ модели
+torch>=2.0.0
+transformers>=4.35.0
+openai-whisper>=20231117
+
+# Для работы с аудио
+librosa>=0.10.0
+soundfile>=0.12.0
+
+# Дополнительные библиотеки для NLP
+numpy>=1.24.0
+scipy>=1.10.0
+
+# Для PDF экспорта
+reportlab>=4.0.0
+
+# Примечание: pathlib и hashlib - встроенные модули Python, устанавливать не нужно
+
+# Для ускорения на GPU (устанавливайте вручную после основных зависимостей):
+# pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118  # CUDA 11.8
+# pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121  # CUDA 12.1
+# pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu   # CPU версия
