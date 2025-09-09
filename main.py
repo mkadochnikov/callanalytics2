@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 Streamlit веб-интерфейс для системы анализа звонков с аналитикой по менеджерам и возражениям
+БЕЗ АНАЛИЗА ТОНАЛЬНОСТИ
 """
 
 from config import *
@@ -18,7 +19,7 @@ def main():
     )
 
     st.title("🤖 Bitrix24 Local AI Analytics")
-    st.markdown("**Полностью локальная система анализа звонков с ИИ** • Whisper + RuBERT + Transformers")
+    st.markdown("**Полностью локальная система анализа звонков с ИИ** • Whisper + Transformers")
 
     # Проверяем доступность CUDA
     device_info = "🔥 CUDA GPU" if torch.cuda.is_available() else "💻 CPU"
@@ -50,7 +51,7 @@ def main():
 
         st.markdown("---")
 
-        # Информация о моделях
+        # Информация о моделях (БЕЗ sentiment)
         st.subheader("🤖 Статус локальных моделей")
 
         whisper_status = "✅ Загружена" if analyzer.audio_processor.whisper_model else "❌ Ошибка"
@@ -59,10 +60,7 @@ def main():
         classifier_status = "✅ Загружена" if analyzer.ai_analyzer.classifier else "❌ Ошибка"
         st.write(f"**Классификация тем:** {classifier_status}")
 
-        sentiment_status = "✅ Загружена" if analyzer.ai_analyzer.sentiment_model else "❌ Ошибка"
-        st.write(f"**RuBERT Sentiment:** {sentiment_status}")
-
-        # Статистика по возражениям
+        # Статистика по возражениям (БЕЗ sentiment)
         if hasattr(analyzer.ai_analyzer, 'custom_objections'):
             custom_count = len(analyzer.ai_analyzer.custom_objections)
             total_count = len(OBJECTION_CATEGORIES) + custom_count
@@ -178,7 +176,7 @@ def main():
 
 
 def show_analysis_results():
-    """Показывает результаты анализа"""
+    """Показывает результаты анализа БЕЗ ТОНАЛЬНОСТИ"""
     if 'all_calls' not in st.session_state or not st.session_state.all_calls:
         return
 
@@ -186,7 +184,7 @@ def show_analysis_results():
 
     calls_data = st.session_state.all_calls
 
-    # Получаем статистику возражений
+    # Получаем статистику возражений (БЕЗ тональности)
     analyzer = st.session_state.analyzer
     objections_stats = analyzer.get_objections_statistics(calls_data)
 
@@ -217,7 +215,7 @@ def show_analysis_results():
         objections_percent = (objections_count / len(calls_data) * 100) if calls_data else 0
         st.metric("Возражения", f"{objections_count} ({objections_percent:.1f}%)")
 
-    # Аналитика возражений
+    # Аналитика возражений (БЕЗ тональности)
     show_objections_analysis(calls_data, objections_stats)
 
     # РАЗДЕЛ: Аналитика по менеджерам
@@ -227,15 +225,15 @@ def show_analysis_results():
     # Разделитель перед остальными разделами
     st.markdown("---")
 
-    # Сводные таблицы
+    # Сводные таблицы (БЕЗ тональности)
     show_summary_tables(calls_data, objections_stats)
 
-    # Детализация
+    # Детализация (БЕЗ тональности)
     show_call_details(calls_data)
 
 
 def show_objections_analysis(calls_data, objections_stats):
-    """Показывает детальный анализ возражений"""
+    """Показывает детальный анализ возражений БЕЗ ТОНАЛЬНОСТИ"""
     st.header("🚫 Анализ возражений клиентов")
 
     if not objections_stats['objections']:
@@ -253,7 +251,7 @@ def show_objections_analysis(calls_data, objections_stats):
                 'Возражение': objection.replace('🎯 ', '').replace('⏰ ', '').replace('🔄 ', '').replace('🔍 ', '').replace(
                     '🤝 ', '').replace('⚙️ ', '').replace('🛡️ ', '').replace('⭐ ', '').replace('🔧 ', '').replace('🎓 ',
                                                                                                                 '').replace(
-                    '🔮 ', ''),
+                    '📝 ', '').replace('❓ ', ''),
                 'Количество': count,
                 'Процент': f"{count / objections_stats['total_calls_with_objections'] * 100:.1f}%",
                 'Оригинальное название': objection
@@ -277,21 +275,9 @@ def show_objections_analysis(calls_data, objections_stats):
                 st.write(f"→ {recommendation}")
                 st.write("")
 
-    # Тональность разговоров с возражениями
-    st.subheader("😊 Тональность звонков")
-    sentiment_stats = objections_stats['sentiment']
-
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("😊 Позитивная", sentiment_stats.get('positive', 0))
-    with col2:
-        st.metric("😐 Нейтральная", sentiment_stats.get('neutral', 0))
-    with col3:
-        st.metric("😞 Негативная", sentiment_stats.get('negative', 0))
-
 
 def show_summary_tables(calls_data, objections_stats):
-    """Показывает сводные таблицы"""
+    """Показывает сводные таблицы БЕЗ ТОНАЛЬНОСТИ"""
     st.header("📊 Сводные таблицы ИИ анализа")
 
     col1, col2 = st.columns(2)
@@ -332,10 +318,10 @@ def show_summary_tables(calls_data, objections_stats):
 
 
 def show_call_details(calls_data):
-    """Показывает детализацию звонков"""
+    """Показывает детализацию звонков БЕЗ ТОНАЛЬНОСТИ"""
     st.header("🔍 Детализация звонков с ИИ анализом")
 
-    # Подготавливаем данные для таблицы
+    # Подготавливаем данные для таблицы (БЕЗ тональности)
     table_data = []
     for call in calls_data:
         analysis = call.get('analysis', {})
@@ -354,8 +340,6 @@ def show_call_details(calls_data):
         # Получаем данные о возражении
         objection_reason = analysis.get('objection_reason', '')
         objection_recommendation = analysis.get('objection_recommendation', '')
-        sentiment_info = analysis.get('sentiment', {})
-        sentiment = sentiment_info.get('sentiment', 'neutral')
 
         # Формируем строку с возражением и рекомендацией
         objection_info = ""
@@ -374,7 +358,6 @@ def show_call_details(calls_data):
             'Длительность': f"{call.get('CALL_DURATION', 0)} сек",
             'Тема (ИИ)': analysis.get('topic', 'Неопределенная тема'),
             'Возражение → Рекомендация': objection_info,
-            'Тональность': f"{'😊' if sentiment == 'positive' else '😐' if sentiment == 'neutral' else '😞'} {sentiment.title()}",
             'Транскрипция': '✅ Есть' if call.get('transcript') else '❌ Нет'
         })
 
@@ -382,12 +365,12 @@ def show_call_details(calls_data):
         df = pd.DataFrame(table_data)
         st.dataframe(df, use_container_width=True)
 
-        # Показываем примеры транскрипций
+        # Показываем примеры транскрипций (БЕЗ тональности)
         show_transcript_examples(calls_data)
 
 
 def show_transcript_examples(calls_data):
-    """Показывает примеры транскрипций"""
+    """Показывает примеры транскрипций БЕЗ ТОНАЛЬНОСТИ"""
     st.subheader("📝 Примеры транскрипций и анализа")
 
     calls_with_transcripts = [call for call in calls_data if call.get('transcript') and call.get('analysis')]
