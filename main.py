@@ -215,9 +215,6 @@ def show_analysis_results():
         objections_percent = (objections_count / len(calls_data) * 100) if calls_data else 0
         st.metric("Возражения", f"{objections_count} ({objections_percent:.1f}%)")
 
-    # Аналитика возражений (БЕЗ тональности)
-    show_objections_analysis(calls_data, objections_stats)
-
     # РАЗДЕЛ: Аналитика по менеджерам
     st.markdown("---")
     show_manager_analytics(calls_data)
