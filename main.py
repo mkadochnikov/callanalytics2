@@ -424,14 +424,6 @@ def show_transcript_examples(calls_data):
                 else:
                     st.write("**Возражения:** Не выявлены")
 
-                # Информация о тональности
-                sentiment_info = analysis.get('sentiment', {})
-                if sentiment_info:
-                    sentiment = sentiment_info.get('sentiment', 'neutral')
-                    confidence = sentiment_info.get('confidence', 0.0)
-                    emoji = {'positive': '😊', 'neutral': '😐', 'negative': '😞'}.get(sentiment, '😐')
-                    st.write(f"**Тональность:** {emoji} {sentiment.title()} ({confidence:.2f})")
-
                 key_points = analysis.get('key_points', [])
                 if key_points:
                     st.write("**Ключевые моменты:**")
