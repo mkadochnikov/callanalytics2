@@ -11,8 +11,20 @@ torch>=2.0.0
 transformers>=4.35.0
 openai-whisper>=20231117
 
-# Модель для анализа возражений и тональности
-# sismetanin/rubert-ru-sentiment-rureviews будет загружена автоматически через transformers
+# NLU модели для русского языка
+natasha>=1.6.0
+razdel>=0.5.0
+navec>=0.10.0
+slovnet>=0.6.0
+yargy>=0.16.0
+ipymarkup>=0.9.0
+pymorphy2>=0.9.1
+pymorphy2-dicts-ru>=2.4.417127.4579844
+
+# DeepPavlov (опционально - требует больше ресурсов)
+# Раскомментируйте если хотите использовать DeepPavlov
+# deeppavlov>=1.3.0
+# tensorflow>=2.10.0
 
 # Для работы с аудио
 librosa>=0.10.0
@@ -21,19 +33,11 @@ soundfile>=0.12.0
 # Дополнительные библиотеки для NLP
 numpy>=1.24.0
 scipy>=1.10.0
+nltk>=3.8
+scikit-learn>=1.3.0
 
-# Для токенизации и работы с RuBERT
+# Для токенизации
 tokenizers>=0.14.0
 
 # Для PDF экспорта
 reportlab>=4.0.0
-
-# Для сентимент анализа (опционально, если потребуются дополнительные возможности)
-scikit-learn>=1.3.0
-
-# Примечание: pathlib и hashlib - встроенные модули Python, устанавливать не нужно
-
-# Для ускорения на GPU (устанавливайте вручную после основных зависимостей):
-# pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118  # CUDA 11.8
-# pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121  # CUDA 12.1
-# pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu   # CPU версия
