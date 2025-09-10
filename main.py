@@ -7,6 +7,11 @@ Streamlit веб-интерфейс для системы анализа зво�
 from config import *
 from main_analyzer import BitrixCallAnalyzer
 from manager_analytics import show_manager_analytics
+from pathlib import Path
+import datetime
+import streamlit as st
+import pandas as pd
+import pytz
 
 
 def main():
@@ -22,6 +27,7 @@ def main():
     st.markdown("**Полностью локальная система анализа звонков с ИИ** • Whisper + Transformers")
 
     # Проверяем доступность CUDA
+    import torch
     device_info = "🔥 CUDA GPU" if torch.cuda.is_available() else "💻 CPU"
     st.sidebar.info(f"Устройство обработки: {device_info}")
 
@@ -62,6 +68,7 @@ def main():
 
         # Статистика по возражениям (БЕЗ sentiment)
         if hasattr(analyzer.ai_analyzer, 'custom_objections'):
+            from config import OBJECTION_CATEGORIES
             custom_count = len(analyzer.ai_analyzer.custom_objections)
             total_count = len(OBJECTION_CATEGORIES) + custom_count
             st.write(
@@ -315,12 +322,12 @@ def show_summary_tables(calls_data, objections_stats):
 
 
 def show_call_details(calls_data):
-    """Показывает детализацию звонков БЕЗ ТОНАЛЬНОСТИ"""
+    """Показывает детализацию звонков с возможностью просмотра транскрипций и прослушивания аудио"""
     st.header("🔍 Детализация звонков с ИИ анализом")
 
-    # Подготавливаем данные для таблицы (БЕЗ тональности)
+    # Подготавливаем данные для таблицы
     table_data = []
-    for call in calls_data:
+    for i, call in enumerate(calls_data):
         analysis = call.get('analysis', {})
 
         # Форматируем время
@@ -346,24 +353,195 @@ def show_call_details(calls_data):
                 objection_info += f" → {objection_recommendation}"
 
         table_data.append({
+            'index': i,
             'Дата/время': formatted_time,
             'Менеджер': call.get('user_name', ''),
             'Телефон': call.get('PHONE_NUMBER', ''),
-            'Тип': call.get('call_direction', 'unknown').replace('incoming', '📞 Входящий').replace('outgoing',
-                                                                                                   '📱 Исходящий').replace(
-                'unknown', '❓ Неопределенный'),
+            'Тип': '📞 Входящий' if call.get('call_direction') == 'incoming' else '📱 Исходящий' if call.get(
+                'call_direction') == 'outgoing' else '❓ Неопределенный',
             'Длительность': f"{call.get('CALL_DURATION', 0)} сек",
             'Тема (ИИ)': analysis.get('topic', 'Неопределенная тема'),
             'Возражение → Рекомендация': objection_info,
-            'Транскрипция': '✅ Есть' if call.get('transcript') else '❌ Нет'
+            'has_transcript': bool(call.get('transcript')),
+            'has_audio': bool(call.get('audio_file'))
         })
 
     if table_data:
+        # Создаем DataFrame
         df = pd.DataFrame(table_data)
-        st.dataframe(df, use_container_width=True)
 
-        # Показываем примеры транскрипций (БЕЗ тональности)
-        show_transcript_examples(calls_data)
+        # Создаем колонки для кнопок
+        col_headers = st.columns([1, 1.5, 1.5, 1, 1, 1.5, 3, 0.8, 0.8])
+        headers = ['Дата/время', 'Менеджер', 'Телефон', 'Тип', 'Длительность', 'Тема (ИИ)', 'Возражение → Рекомендация',
+                   'Транскрипция', 'Аудио']
+
+        for col, header in zip(col_headers, headers):
+            col.markdown(f"**{header}**")
+
+        # Отображаем каждую строку с кнопками
+        for idx, row in df.iterrows():
+            cols = st.columns([1, 1.5, 1.5, 1, 1, 1.5, 3, 0.8, 0.8])
+
+            # Данные
+            cols[0].write(row['Дата/время'])
+            cols[1].write(row['Менеджер'])
+            cols[2].write(row['Телефон'])
+            cols[3].write(row['Тип'])
+            cols[4].write(row['Длительность'])
+            cols[5].write(row['Тема (ИИ)'])
+            cols[6].write(row['Возражение → Рекомендация'])
+
+            # Кнопка транскрипции
+            if row['has_transcript']:
+                if cols[7].button('📄', key=f"transcript_{row['index']}", help="Прочитать транскрипцию"):
+                    show_transcript_modal(calls_data[row['index']])
+            else:
+                cols[7].write('❌')
+
+            # Кнопка аудио
+            if row['has_audio']:
+                if cols[8].button('🔊', key=f"audio_{row['index']}", help="Прослушать запись"):
+                    show_audio_modal(calls_data[row['index']])
+            else:
+                cols[8].write('❌')
+
+        # Статистика под таблицей
+        st.markdown("---")
+        col1, col2, col3, col4 = st.columns(4)
+
+        with col1:
+            total_with_transcript = sum(1 for d in table_data if d['has_transcript'])
+            st.metric("С транскрипцией", f"{total_with_transcript}/{len(table_data)}")
+
+        with col2:
+            total_with_audio = sum(1 for d in table_data if d['has_audio'])
+            st.metric("С аудиозаписью", f"{total_with_audio}/{len(table_data)}")
+
+        with col3:
+            total_with_objections = sum(1 for d in table_data if d['Возражение → Рекомендация'])
+            st.metric("С возражениями", f"{total_with_objections}/{len(table_data)}")
+
+        with col4:
+            avg_duration = df['Длительность'].apply(lambda x: int(x.split()[0])).mean()
+            st.metric("Средняя длительность", f"{avg_duration:.0f} сек")
+
+
+def show_transcript_modal(call_data):
+    """Показывает модальное окно с транскрипцией"""
+    # Получаем информацию о звонке
+    call_info = f"""
+    **Менеджер:** {call_data.get('user_name', 'Неизвестный')}  
+    **Телефон:** {call_data.get('PHONE_NUMBER', 'Неизвестный')}  
+    **Длительность:** {call_data.get('CALL_DURATION', 0)} сек
+    """
+
+    # Получаем анализ
+    analysis = call_data.get('analysis', {})
+    analysis_info = f"""
+    **Тема:** {analysis.get('topic', 'Не определена')}  
+    **Возражение:** {analysis.get('objection_reason', 'Не обнаружено')}  
+    **Рекомендация:** {analysis.get('objection_recommendation', 'Нет')}
+    """
+
+    # Создаем модальное окно с использованием expander
+    with st.expander("📄 Транскрипция разговора", expanded=True):
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown("### Информация о звонке")
+            st.markdown(call_info)
+
+        with col2:
+            st.markdown("### ИИ Анализ")
+            st.markdown(analysis_info)
+
+        st.markdown("---")
+        st.markdown("### Текст разговора")
+
+        # Отображаем транскрипцию
+        transcript = call_data.get('transcript', 'Транскрипция отсутствует')
+
+        # Форматируем текст для лучшей читаемости
+        formatted_transcript = transcript.replace('. ', '.\n\n')
+
+        # Используем text_area для возможности копирования
+        st.text_area(
+            "Транскрипция",
+            formatted_transcript,
+            height=400,
+            disabled=True,
+            label_visibility="collapsed"
+        )
+
+        # Кнопка копирования
+        if st.button("📋 Копировать текст", key=f"copy_{call_data.get('ID', '')}"):
+            st.code(transcript)
+            st.info("Выделите и скопируйте текст выше")
+
+
+def show_audio_modal(call_data):
+    """Показывает модальное окно с аудиоплеером"""
+    audio_file_path = call_data.get('audio_file')
+
+    if audio_file_path and Path(audio_file_path).exists():
+        # Создаем модальное окно с использованием expander
+        with st.expander("🔊 Прослушивание записи", expanded=True):
+            # Информация о звонке
+            col1, col2, col3 = st.columns(3)
+
+            with col1:
+                st.metric("Менеджер", call_data.get('user_name', 'Неизвестный'))
+
+            with col2:
+                st.metric("Телефон", call_data.get('PHONE_NUMBER', 'Неизвестный'))
+
+            with col3:
+                st.metric("Длительность", f"{call_data.get('CALL_DURATION', 0)} сек")
+
+            st.markdown("---")
+
+            # Читаем аудиофайл
+            try:
+                with open(audio_file_path, 'rb') as audio_file:
+                    audio_bytes = audio_file.read()
+
+                # Отображаем аудиоплеер
+                st.audio(audio_bytes, format='audio/mp3')
+
+                # Информация о файле
+                file_size = Path(audio_file_path).stat().st_size / (1024 * 1024)  # в МБ
+                st.info(f"📁 Размер файла: {file_size:.2f} МБ")
+
+                # Если есть транскрипция, показываем ее тоже
+                if call_data.get('transcript'):
+                    st.markdown("### 📝 Транскрипция")
+                    st.text_area(
+                        "Текст разговора",
+                        call_data['transcript'],
+                        height=200,
+                        disabled=True,
+                        label_visibility="collapsed"
+                    )
+
+                # Если есть анализ, показываем основные моменты
+                if call_data.get('analysis'):
+                    analysis = call_data['analysis']
+                    st.markdown("### 🤖 ИИ Анализ")
+
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.write(f"**Тема:** {analysis.get('topic', 'Не определена')}")
+                        st.write(f"**Возражение:** {analysis.get('objection_reason', 'Не обнаружено')}")
+
+                    with col2:
+                        result = analysis.get('call_result', {})
+                        st.write(f"**Результат:** {result.get('result', 'Не определен')}")
+                        st.write(f"**Рекомендация:** {analysis.get('objection_recommendation', 'Нет')}")
+
+            except Exception as e:
+                st.error(f"Ошибка при загрузке аудиофайла: {str(e)}")
+    else:
+        st.error("Аудиофайл не найден или не доступен")
 
 
 def show_transcript_examples(calls_data):
